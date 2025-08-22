@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-t3-validation
+  labels:
+    app: test-t3-validation
+    test-type: trunk-eni-validation
+spec:
+  nodeSelector:
+    node-type: m5-dynamic-v2
+  # Force T3 instance selection
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+          - key: node.kubernetes.io/instance-type
+            operator: In
+            values: ["t3.medium", "t3.large", "t3.xlarge"]
+  containers:
+  - name: validation-container
+    image: nginx:alpine
+    resources:
+      requests:
+        cpu: 800m      # Target t3.medium/large
+        memory: 2Gi    
+      limits:
+        cpu: 1000m
+        memory: 3Gi
+    ports:
+    - containerPort: 80
+    env:
+    - name: TEST_TYPE
+      value: "t3-trunk-eni-validation"
+    - name: EXPECTED_BEHAVIOR
+      value: "no-eni-reservation"
+  restartPolicy: Always
