@@ -1,0 +1,181 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: m5-dynamic-nodeclass-v2
+spec:
+  amiFamily: AL2
+  amiSelectorTerms:
+    - alias: al2@latest
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "nlb-test-cluster"
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "nlb-test-cluster"
+  instanceProfile: "KarpenterNodeInstanceProfile"
+  
+  userData: |
+    #!/bin/bash
+    
+    # Wait for network to be ready
+    sleep 15
+    
+    # Dynamic maxPods calculation function
+    calculate_max_pods() {
+        local instance_type=$1
+        local default_max_pods
+        local reserved_enis
+        local adjusted_max_pods
+        
+        # Get default maxPods value based on instance type
+        case $instance_type in
+            # T3 series
+            "t3.micro")    default_max_pods=4;   reserved_enis=2 ;;
+            "t3.small")    default_max_pods=11;  reserved_enis=4 ;;
+            "t3.medium")   default_max_pods=17;  reserved_enis=6 ;;
+            "t3.large")    default_max_pods=35;  reserved_enis=12 ;;
+            "t3.xlarge")   default_max_pods=58;  reserved_enis=18 ;;
+            "t3.2xlarge")  default_max_pods=58;  reserved_enis=18 ;;
+            
+            # M5 series
+            "m5.large")    default_max_pods=29;  reserved_enis=9 ;;
+            "m5.xlarge")   default_max_pods=58;  reserved_enis=18 ;;
+            "m5.2xlarge")  default_max_pods=58;  reserved_enis=18 ;;
+            "m5.4xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "m5.8xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "m5.12xlarge") default_max_pods=234; reserved_enis=54 ;;
+            "m5.16xlarge") default_max_pods=737; reserved_enis=108 ;;
+            "m5.24xlarge") default_max_pods=737; reserved_enis=108 ;;
+            
+            # C5 series
+            "c5.large")    default_max_pods=29;  reserved_enis=9 ;;
+            "c5.xlarge")   default_max_pods=58;  reserved_enis=18 ;;
+            "c5.2xlarge")  default_max_pods=58;  reserved_enis=18 ;;
+            "c5.4xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "c5.9xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "c5.12xlarge") default_max_pods=234; reserved_enis=54 ;;
+            "c5.18xlarge") default_max_pods=737; reserved_enis=108 ;;
+            "c5.24xlarge") default_max_pods=737; reserved_enis=108 ;;
+            
+            # R5 series
+            "r5.large")    default_max_pods=29;  reserved_enis=9 ;;
+            "r5.xlarge")   default_max_pods=58;  reserved_enis=18 ;;
+            "r5.2xlarge")  default_max_pods=58;  reserved_enis=18 ;;
+            "r5.4xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "r5.8xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "r5.12xlarge") default_max_pods=234; reserved_enis=54 ;;
+            "r5.16xlarge") default_max_pods=737; reserved_enis=108 ;;
+            "r5.24xlarge") default_max_pods=737; reserved_enis=108 ;;
+            
+            # M6i series
+            "m6i.large")    default_max_pods=29;  reserved_enis=9 ;;
+            "m6i.xlarge")   default_max_pods=58;  reserved_enis=18 ;;
+            "m6i.2xlarge")  default_max_pods=58;  reserved_enis=18 ;;
+            "m6i.4xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "m6i.8xlarge")  default_max_pods=234; reserved_enis=54 ;;
+            "m6i.12xlarge") default_max_pods=234; reserved_enis=54 ;;
+            "m6i.16xlarge") default_max_pods=737; reserved_enis=108 ;;
+            "m6i.24xlarge") default_max_pods=737; reserved_enis=108 ;;
+            
+            # Default values for unknown types
+            *)
+                echo "Unknown instance type: $instance_type, using conservative defaults" >> /var/log/karpenter-maxpods.log
+                default_max_pods=20
+                reserved_enis=5
+                ;;
+        esac
+        
+        # Calculate adjusted maxPods
+        adjusted_max_pods=$((default_max_pods - reserved_enis))
+        
+        # Ensure minimum value of 10
+        if [ $adjusted_max_pods -lt 10 ]; then
+            adjusted_max_pods=10
+        fi
+        
+        echo $adjusted_max_pods
+    }
+    
+    # Get instance type using IMDSv2
+    INSTANCE_TYPE=""
+    for i in {1..10}; do
+        # Get IMDSv2 token
+        TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" --max-time 5 2>/dev/null)
+        if [ ! -z "$TOKEN" ]; then
+            # Use token to get instance type
+            INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null)
+            if [ ! -z "$INSTANCE_TYPE" ]; then
+                break
+            fi
+        fi
+        echo "Retry $i: Waiting for instance metadata..." >> /var/log/karpenter-maxpods.log
+        sleep 10
+    done
+    
+    # Calculate maxPods
+    MAX_PODS=$(calculate_max_pods $INSTANCE_TYPE)
+    
+    # Log basic configuration
+    echo "$(date): Instance Type: $INSTANCE_TYPE, Calculated Max Pods: $MAX_PODS" >> /var/log/karpenter-maxpods.log
+    
+    # Wait for kubelet config directory to be ready
+    while [ ! -d "/etc/kubernetes/kubelet" ]; do
+        echo "$(date): Waiting for kubelet config directory..." >> /var/log/karpenter-maxpods.log
+        sleep 5
+    done
+    
+    # Check Security Groups for Pods (will be performed after cluster join)
+    echo "$(date): Using calculated Max Pods value: $MAX_PODS" >> /var/log/karpenter-maxpods.log
+    echo "$(date): Security Groups for Pods detection will be performed after cluster join" >> /var/log/karpenter-maxpods.log
+    
+    # Bootstrap EKS with calculated maxPods
+    /etc/eks/bootstrap.sh nlb-test-cluster --kubelet-extra-args "--max-pods=$MAX_PODS"
+    
+    # Create post-join check script
+    cat > /opt/check-sg-for-pods.sh << 'EOF'
+    #!/bin/bash
+    # Wait for node to fully join cluster
+    sleep 60
+    
+    # Check Security Groups for Pods configuration
+    SG_FOR_PODS_ENABLED="false"
+    
+    # Try multiple methods to check ENABLE_POD_ENI
+    if command -v kubectl >/dev/null 2>&1; then
+        # Method 1: Check aws-node DaemonSet
+        SG_FOR_PODS_ENABLED=$(kubectl get daemonset aws-node -n kube-system -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ENABLE_POD_ENI")].value}' 2>/dev/null || echo "false")
+        
+        # Method 2: If method 1 fails, check ConfigMap
+        if [ "$SG_FOR_PODS_ENABLED" = "false" ] || [ -z "$SG_FOR_PODS_ENABLED" ]; then
+            SG_FOR_PODS_ENABLED=$(kubectl get configmap amazon-vpc-cni -n kube-system -o jsonpath='{.data.enable-pod-eni}' 2>/dev/null || echo "false")
+        fi
+    fi
+    
+    # Log Security Groups for Pods status
+    if [ "$SG_FOR_PODS_ENABLED" = "true" ]; then
+        echo "$(date): Security Groups for Pods is ENABLED - using ENI-optimized Max Pods calculation" >> /var/log/karpenter-maxpods.log
+    else
+        echo "$(date): Security Groups for Pods is DISABLED - using standard Max Pods calculation" >> /var/log/karpenter-maxpods.log
+    fi
+    
+    # Log final configuration
+    CURRENT_MAX_PODS=$(ps aux | grep kubelet | grep -o '\--max-pods=[0-9]*' | cut -d= -f2)
+    echo "$(date): Final Max Pods configuration: $CURRENT_MAX_PODS" >> /var/log/karpenter-maxpods.log
+    EOF
+    
+    chmod +x /opt/check-sg-for-pods.sh
+    
+    # Run check script in background
+    nohup /opt/check-sg-for-pods.sh > /var/log/sg-pods-check.log 2>&1 &
+
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  
+  tags:
+    ManagedBy: "karpenter"
+    Version: "v2"

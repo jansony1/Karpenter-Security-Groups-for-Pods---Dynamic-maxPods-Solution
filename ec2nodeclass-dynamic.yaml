@@ -29,7 +29,7 @@ spec:
         fi
     }
     
-    # Function to check if instance type supports trunk ENI
+    # Function to check if instance type supports trunk ENI by querying AWS VPC Resource Controller limits
     is_trunk_eni_compatible() {
         local instance_type=$1
         
@@ -217,9 +217,79 @@ spec:
     done
     
     echo "$(date): Using calculated Max Pods value: $MAX_PODS" >> /var/log/karpenter-maxpods.log
+    echo "$(date): Security Groups for Pods detection will be performed after cluster join" >> /var/log/karpenter-maxpods.log
     
     # Bootstrap EKS with calculated maxPods
     /etc/eks/bootstrap.sh nlb-test-cluster --kubelet-extra-args "--max-pods=$MAX_PODS"
+    
+    # Create post-join check script for SG for Pods validation
+    cat > /opt/check-sg-for-pods.sh << 'EOFINNER'
+    #!/bin/bash
+    # Wait for node to fully join cluster
+    sleep 60
+    
+    # Check Security Groups for Pods configuration
+    SG_FOR_PODS_ENABLED="false"
+    
+    # Try multiple methods to check ENABLE_POD_ENI
+    if command -v kubectl >/dev/null 2>&1; then
+        # Method 1: Check aws-node DaemonSet
+        SG_FOR_PODS_ENABLED=$(kubectl get daemonset aws-node -n kube-system -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="ENABLE_POD_ENI")].value}' 2>/dev/null || echo "false")
+        
+        # Method 2: If method 1 fails, check ConfigMap
+        if [ "$SG_FOR_PODS_ENABLED" = "false" ] || [ -z "$SG_FOR_PODS_ENABLED" ]; then
+            SG_FOR_PODS_ENABLED=$(kubectl get configmap amazon-vpc-cni -n kube-system -o jsonpath='{.data.enable-pod-eni}' 2>/dev/null || echo "false")
+        fi
+    fi
+    
+    # Get instance type and trunk ENI compatibility
+    INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" --max-time 5 2>/dev/null)" -s --max-time 5 http://169.254.169.254/latest/meta-data/instance-type 2>/dev/null)
+    
+    # Check trunk ENI compatibility using the same logic
+    TRUNK_ENI_COMPATIBLE="false"
+    case $INSTANCE_TYPE in
+        m5.*|m5a.*|m5ad.*|m5d.*|m5dn.*|m5n.*|m5zn.*|m6i.*|m6a.*|m6id.*|m6idn.*|m7i.*|m7a.*) TRUNK_ENI_COMPATIBLE="true" ;;
+        c5.*|c5a.*|c5ad.*|c5d.*|c5n.*|c6i.*|c6a.*|c6id.*|c6in.*|c7i.*|c7a.*) TRUNK_ENI_COMPATIBLE="true" ;;
+        r5.*|r5a.*|r5ad.*|r5b.*|r5d.*|r5dn.*|r5n.*|r6i.*|r6a.*|r6id.*|r6idn.*|r7i.*|r7a.*) TRUNK_ENI_COMPATIBLE="true" ;;
+        i3.*|i3en.*|i4i.*|x2iezn.*|x2idn.*|x2gd.*|z1d.*) TRUNK_ENI_COMPATIBLE="true" ;;
+        t1.*|t2.*|t3.*|t3a.*|t4g.*|m1.*|m2.*|m3.*|m4.*|c1.*|c3.*|c4.*|r3.*|r4.*|i2.*) TRUNK_ENI_COMPATIBLE="false" ;;
+        *) TRUNK_ENI_COMPATIBLE="unknown" ;;
+    esac
+    
+    # Log comprehensive status
+    echo "$(date): === Security Groups for Pods Validation ===" >> /var/log/karpenter-maxpods.log
+    echo "$(date): Instance Type: $INSTANCE_TYPE" >> /var/log/karpenter-maxpods.log
+    echo "$(date): Trunk ENI Compatible: $TRUNK_ENI_COMPATIBLE" >> /var/log/karpenter-maxpods.log
+    echo "$(date): Security Groups for Pods Enabled: $SG_FOR_PODS_ENABLED" >> /var/log/karpenter-maxpods.log
+    
+    if [ "$SG_FOR_PODS_ENABLED" = "true" ]; then
+        if [ "$TRUNK_ENI_COMPATIBLE" = "true" ]; then
+            echo "$(date): [OK] Security Groups for Pods is ENABLED and instance supports trunk ENI" >> /var/log/karpenter-maxpods.log
+            echo "$(date): ENI reservation is appropriate for this configuration" >> /var/log/karpenter-maxpods.log
+        else
+            echo "$(date): [WARNING] Security Groups for Pods is ENABLED but instance does NOT support trunk ENI" >> /var/log/karpenter-maxpods.log
+            echo "$(date): Pods on this node will not benefit from Security Groups for Pods" >> /var/log/karpenter-maxpods.log
+        fi
+    else
+        if [ "$TRUNK_ENI_COMPATIBLE" = "true" ]; then
+            echo "$(date): [INFO] Security Groups for Pods is DISABLED but instance supports trunk ENI" >> /var/log/karpenter-maxpods.log
+            echo "$(date): Could enable Security Groups for Pods if needed" >> /var/log/karpenter-maxpods.log
+        else
+            echo "$(date): [OK] Security Groups for Pods is DISABLED and instance does not support trunk ENI" >> /var/log/karpenter-maxpods.log
+            echo "$(date): Standard maxPods calculation is appropriate" >> /var/log/karpenter-maxpods.log
+        fi
+    fi
+    
+    # Log final configuration
+    CURRENT_MAX_PODS=$(ps aux | grep kubelet | grep -o '\--max-pods=[0-9]*' | cut -d= -f2)
+    echo "$(date): Final Max Pods configuration: $CURRENT_MAX_PODS" >> /var/log/karpenter-maxpods.log
+    echo "$(date): === Validation Complete ===" >> /var/log/karpenter-maxpods.log
+EOFINNER
+    
+    chmod +x /opt/check-sg-for-pods.sh
+    
+    # Run check script in background
+    nohup /opt/check-sg-for-pods.sh > /var/log/sg-pods-check.log 2>&1 &
 
   blockDeviceMappings:
     - deviceName: /dev/xvda
