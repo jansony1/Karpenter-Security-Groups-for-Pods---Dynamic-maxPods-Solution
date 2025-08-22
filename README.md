@@ -35,13 +35,63 @@ This project provides **dynamic maxPods calculation** for Karpenter-managed node
 
 ## 📋 Supported Instance Types
 
-| Series | Instance Types | maxPods Range | Use Case |
-|--------|----------------|---------------|----------|
-| **T3** | micro → 2xlarge | 2-40 pods | Cost-optimized workloads |
-| **M5** | large → 24xlarge | 20-629 pods | General purpose workloads |
-| **C5** | large → 24xlarge | 20-629 pods | Compute-optimized workloads |
-| **R5** | large → 24xlarge | 20-629 pods | Memory-optimized workloads |
-| **M6i** | large → 24xlarge | 20-629 pods | Latest generation instances |
+### 🚫 T3 Series (No Trunk ENI Support - No SG for Pods)
+| Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
+|---------------|-----------------|-----------------|---------------|-----|--------|
+| t3.micro | 4 | 0 | 4 | 2 vCPU | 1GB |
+| t3.small | 11 | 0 | 11 | 2 vCPU | 2GB |
+| t3.medium | 17 | 0 | 17 | 2 vCPU | 4GB |
+| t3.large | 35 | 0 | 35 | 2 vCPU | 8GB |
+| t3.xlarge | 58 | 0 | 58 | 4 vCPU | 16GB |
+| t3.2xlarge | 58 | 0 | 58 | 8 vCPU | 32GB |
+
+### ✅ M5 Series (Trunk ENI Compatible - SG for Pods Supported)
+| Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
+|---------------|-----------------|-----------------|---------------|-----|--------|
+| m5.large | 29 | 9 | 20 | 2 vCPU | 8GB |
+| m5.xlarge | 58 | 18 | 40 | 4 vCPU | 16GB |
+| m5.2xlarge | 58 | 18 | 40 | 8 vCPU | 32GB |
+| m5.4xlarge | 234 | 54 | 180 | 16 vCPU | 64GB |
+| m5.8xlarge | 234 | 54 | 180 | 32 vCPU | 128GB |
+| m5.12xlarge | 234 | 54 | 180 | 48 vCPU | 192GB |
+| m5.16xlarge | 737 | 108 | 629 | 64 vCPU | 256GB |
+| m5.24xlarge | 737 | 108 | 629 | 96 vCPU | 384GB |
+
+### ✅ C5 Series (Trunk ENI Compatible - SG for Pods Supported)
+| Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
+|---------------|-----------------|-----------------|---------------|-----|--------|
+| c5.large | 29 | 9 | 20 | 2 vCPU | 4GB |
+| c5.xlarge | 58 | 18 | 40 | 4 vCPU | 8GB |
+| c5.2xlarge | 58 | 18 | 40 | 8 vCPU | 16GB |
+| c5.4xlarge | 234 | 54 | 180 | 16 vCPU | 32GB |
+| c5.9xlarge | 234 | 54 | 180 | 36 vCPU | 72GB |
+| c5.12xlarge | 234 | 54 | 180 | 48 vCPU | 96GB |
+| c5.18xlarge | 737 | 108 | 629 | 72 vCPU | 144GB |
+| c5.24xlarge | 737 | 108 | 629 | 96 vCPU | 192GB |
+
+### ✅ R5 Series (Trunk ENI Compatible - SG for Pods Supported)
+| Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
+|---------------|-----------------|-----------------|---------------|-----|--------|
+| r5.large | 29 | 9 | 20 | 2 vCPU | 16GB |
+| r5.xlarge | 58 | 18 | 40 | 4 vCPU | 32GB |
+| r5.2xlarge | 58 | 18 | 40 | 8 vCPU | 64GB |
+| r5.4xlarge | 234 | 54 | 180 | 16 vCPU | 128GB |
+| r5.8xlarge | 234 | 54 | 180 | 32 vCPU | 256GB |
+| r5.12xlarge | 234 | 54 | 180 | 48 vCPU | 384GB |
+| r5.16xlarge | 737 | 108 | 629 | 64 vCPU | 512GB |
+| r5.24xlarge | 737 | 108 | 629 | 96 vCPU | 768GB |
+
+### ✅ M6i Series (Trunk ENI Compatible - SG for Pods Supported)
+| Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
+|---------------|-----------------|-----------------|---------------|-----|--------|
+| m6i.large | 29 | 9 | 20 | 2 vCPU | 8GB |
+| m6i.xlarge | 58 | 18 | 40 | 4 vCPU | 16GB |
+| m6i.2xlarge | 58 | 18 | 40 | 8 vCPU | 32GB |
+| m6i.4xlarge | 234 | 54 | 180 | 16 vCPU | 64GB |
+| m6i.8xlarge | 234 | 54 | 180 | 32 vCPU | 128GB |
+| m6i.12xlarge | 234 | 54 | 180 | 48 vCPU | 192GB |
+| m6i.16xlarge | 737 | 108 | 629 | 64 vCPU | 256GB |
+| m6i.24xlarge | 737 | 108 | 629 | 96 vCPU | 384GB |
 
 ## 🏗️ Architecture
 
@@ -54,24 +104,38 @@ This project provides **dynamic maxPods calculation** for Karpenter-managed node
                                                          │
                                                          ▼
                        ┌──────────────────┐    ┌─────────────────┐
-                       │   Instance       │    │   Calculated    │
-                       │   Metadata       │───▶│   maxPods       │
-                       │   (IMDSv2)       │    │   Value         │
+                       │   Instance       │    │   Instance Type │
+                       │   Metadata       │───▶│   Detection     │
+                       │   (IMDSv2)       │    │                 │
                        └──────────────────┘    └─────────────────┘
                                                          │
                                                          ▼
                        ┌──────────────────┐    ┌─────────────────┐
-                       │   kubelet        │    │   Node Joins    │
-                       │   Starts with    │───▶│   Cluster       │
-                       │   maxPods        │    │                 │
+                       │  Trunk ENI       │    │  SG for Pods    │
+                       │  Compatibility   │◀───│  Status Check   │
+                       │  Check           │    │  (Post-Join)    │
                        └──────────────────┘    └─────────────────┘
-                                                         │
-                                                         ▼
-                       ┌──────────────────┐    ┌─────────────────┐
-                       │  Security Groups │    │   Validation    │
-                       │  for Pods        │───▶│   & Logging     │
-                       │  Detection       │    │   (Background)  │
-                       └──────────────────┘    └─────────────────┘
+                                │                        │
+                                ▼                        │
+                       ┌──────────────────┐              │
+                       │   Dynamic        │              │
+                       │   maxPods        │              │
+                       │   Calculation    │              │
+                       └──────────────────┘              │
+                                │                        │
+                                ▼                        │
+                       ┌──────────────────┐              │
+                       │   kubelet        │              │
+                       │   Starts with    │              │
+                       │   maxPods        │              │
+                       └──────────────────┘              │
+                                │                        │
+                                ▼                        │
+                       ┌──────────────────┐              │
+                       │   Node Joins     │              │
+                       │   Cluster        │──────────────┘
+                       │                  │
+                       └──────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -139,8 +203,12 @@ kubectl describe node <node-name> | grep -E "(instance-type|pods)"
 ### 1. Dynamic Calculation Algorithm
 
 ```bash
-# Core calculation formula
-adjusted_max_pods = default_max_pods - reserved_enis
+# Core calculation logic
+if (instance_supports_trunk_ENI && SG_for_Pods_enabled); then
+    adjusted_max_pods = default_max_pods - reserved_enis
+else
+    adjusted_max_pods = default_max_pods  # No ENI reservation needed
+fi
 
 # Safety minimum
 if adjusted_max_pods < 10; then
@@ -148,33 +216,44 @@ if adjusted_max_pods < 10; then
 fi
 ```
 
-### 2. Instance Type Detection
+### 2. Instance Type and Trunk ENI Compatibility Detection
 
-The solution uses IMDSv2 to detect the instance type and applies the appropriate maxPods calculation:
+The solution first detects the instance type using IMDSv2, then checks trunk ENI compatibility:
 
 ```bash
-# Example for m5.xlarge
-default_max_pods=58    # AWS default for m5.xlarge
-reserved_enis=18       # Reserved for trunk interfaces
-calculated_max_pods=40 # Final result: 58-18=40
+# Trunk ENI Compatible (Security Groups for Pods supported)
+m5.*, c5.*, r5.*, m6i.* → IsTrunkingCompatible: true
+
+# Trunk ENI NOT Compatible (Security Groups for Pods NOT supported)  
+t1.*, t2.*, t3.* → IsTrunkingCompatible: false
 ```
 
 ### 3. Execution Flow
 
 1. **Node Bootstrap**: Karpenter creates node with EC2NodeClass userData
 2. **Instance Detection**: Script uses IMDSv2 to get instance type
-3. **maxPods Calculation**: Applies formula based on instance type
-4. **kubelet Start**: Launches kubelet with calculated maxPods value
-5. **Cluster Join**: Node joins the cluster with correct pod capacity
-6. **Background Validation**: Asynchronously detects and logs SG for Pods status
+3. **Trunk ENI Check**: Determines if instance supports Security Groups for Pods
+4. **SG for Pods Detection**: Checks cluster configuration (post-join)
+5. **Dynamic Calculation**: Applies appropriate maxPods formula
+6. **kubelet Start**: Launches kubelet with calculated maxPods value
+7. **Cluster Join**: Node joins cluster with correct pod capacity
+8. **Validation**: Background script validates configuration and logs results
 
-### 4. Security Groups for Pods Detection (Post-Join Validation)
+### 4. Instance Type Support Matrix
 
-After the node joins the cluster, a background script validates the configuration:
-- Checks aws-node DaemonSet environment variables
-- Verifies amazon-vpc-cni ConfigMap settings
-- Logs the detected configuration for troubleshooting
-- **Note**: This is for validation/logging only, not for calculation adjustment
+| Instance Family | Trunk ENI Support | ENI Reservation | Example Calculation |
+|-----------------|-------------------|-----------------|-------------------|
+| **T3 Series** | ❌ No | None | t3.xlarge: 58 pods (no reservation) |
+| **M5 Series** | ✅ Yes | Required | m5.xlarge: 40 pods (58-18) |
+| **C5 Series** | ✅ Yes | Required | c5.large: 20 pods (29-9) |
+| **R5 Series** | ✅ Yes | Required | r5.xlarge: 40 pods (58-18) |
+| **M6i Series** | ✅ Yes | Required | m6i.xlarge: 40 pods (58-18) |
+
+### 5. Security Groups for Pods Impact
+
+- **If SG for Pods is enabled** + **Instance supports trunk ENI**: ENIs are reserved for trunk interfaces
+- **If SG for Pods is disabled** OR **Instance doesn't support trunk ENI**: No ENI reservation needed
+- **Validation**: Post-join script validates the configuration and logs any mismatches
 
 ## 📊 Validation Results
 
