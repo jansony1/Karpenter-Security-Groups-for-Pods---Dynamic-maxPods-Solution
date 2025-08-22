@@ -1,0 +1,70 @@
+VERSION=v2
+RELEASE_DATE=2025-08-21
+STATUS=READY_FOR_TESTING
+DESCRIPTION=Karpenter动态maxPods配置 - 智能计算版本，支持多实例类型和Security Groups for Pods检测
+
+MAJOR_IMPROVEMENTS_FROM_V1:
+- 智能maxPods计算算法 (默认maxPods - 预留ENI)
+- 支持T3/M5/C5/R5/M6i系列实例类型
+- Security Groups for Pods自动检测和优化
+- 详细的计算过程日志记录
+- 后台配置验证机制
+- 更全面的错误处理
+
+SUPPORTED_INSTANCE_TYPES:
+T3系列:
+- t3.micro: 2 pods (4-2)
+- t3.small: 7 pods (11-4)
+- t3.medium: 11 pods (17-6)
+- t3.large: 23 pods (35-12)
+- t3.xlarge: 40 pods (58-18)
+- t3.2xlarge: 40 pods (58-18)
+
+M5系列:
+- m5.large: 20 pods (29-9)
+- m5.xlarge: 40 pods (58-18)
+- m5.2xlarge: 40 pods (58-18)
+- m5.4xlarge: 180 pods (234-54)
+- m5.8xlarge: 180 pods (234-54)
+- m5.12xlarge: 180 pods (234-54)
+- m5.16xlarge: 629 pods (737-108)
+- m5.24xlarge: 629 pods (737-108)
+
+C5系列: (同M5系列配置)
+R5系列: (同M5系列配置)
+M6i系列: (同M5系列配置)
+
+CALCULATION_ALGORITHM:
+adjusted_max_pods = default_max_pods - reserved_enis
+if adjusted_max_pods < 10; then adjusted_max_pods = 10
+
+SECURITY_GROUPS_FOR_PODS:
+- 自动检测ENABLE_POD_ENI环境变量
+- 检查aws-node DaemonSet配置
+- 检查amazon-vpc-cni ConfigMap
+- 后台异步验证机制
+
+COMPONENTS:
+- EC2NodeClass: m5-dynamic-nodeclass-v2
+- NodePool: m5-dynamic-nodepool-v2
+- 测试配置: test-pod.yaml, test-multi-instances.yaml
+- 部署脚本: deploy.sh, cleanup.sh, validation-script.sh
+
+LOG_FILES:
+- /var/log/karpenter-maxpods.log: 主要配置和计算日志
+- /var/log/sg-pods-check.log: Security Groups for Pods检查日志
+
+COMPATIBILITY:
+- Karpenter: v1.x
+- Kubernetes: 1.30+
+- AWS EKS: 支持
+- IMDSv2: 必需
+- Security Groups for Pods: 自动检测
+
+TESTING_STATUS:
+- 基础功能: 待测试
+- 多实例类型: 待测试
+- SG for Pods检测: 待测试
+- 日志记录: 待测试
+
+BASED_ON: v1 (IMDSv2支持版本)

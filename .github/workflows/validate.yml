@@ -1,0 +1,59 @@
+name: Validate Configurations
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  validate-yaml:
+    runs-on: ubuntu-latest
+    name: Validate YAML Configurations
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: 'v1.30.0'
+        
+    - name: Validate YAML files
+      run: |
+        echo "Validating YAML files..."
+        for file in *.yaml; do
+          if [ -f "$file" ]; then
+            echo "Validating $file"
+            kubectl --dry-run=client --validate=true apply -f "$file" || exit 1
+          fi
+        done
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    name: Shellcheck Scripts
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Run ShellCheck
+      uses: ludeeus/action-shellcheck@master
+      with:
+        scandir: '.'
+        format: gcc
+        severity: warning
+
+  markdown-lint:
+    runs-on: ubuntu-latest
+    name: Lint Markdown
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Lint Markdown files
+      uses: articulate/actions-markdownlint@v1
+      with:
+        files: '*.md'
