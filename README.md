@@ -53,11 +53,25 @@ This project provides **dynamic maxPods calculation** for Karpenter-managed node
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                                                          │
                                                          ▼
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│  Security Groups│    │   Instance       │    │   Calculated    │
-│  for Pods       │◀───│   Metadata       │───▶│   maxPods       │
-│  Detection      │    │   (IMDSv2)       │    │   Value         │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   Instance       │    │   Calculated    │
+                       │   Metadata       │───▶│   maxPods       │
+                       │   (IMDSv2)       │    │   Value         │
+                       └──────────────────┘    └─────────────────┘
+                                                         │
+                                                         ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │   kubelet        │    │   Node Joins    │
+                       │   Starts with    │───▶│   Cluster       │
+                       │   maxPods        │    │                 │
+                       └──────────────────┘    └─────────────────┘
+                                                         │
+                                                         ▼
+                       ┌──────────────────┐    ┌─────────────────┐
+                       │  Security Groups │    │   Validation    │
+                       │  for Pods        │───▶│   & Logging     │
+                       │  Detection       │    │   (Background)  │
+                       └──────────────────┘    └─────────────────┘
 ```
 
 ## 🚀 Quick Start
@@ -145,12 +159,22 @@ reserved_enis=18       # Reserved for trunk interfaces
 calculated_max_pods=40 # Final result: 58-18=40
 ```
 
-### 3. Security Groups for Pods Detection
+### 3. Execution Flow
 
-Automatically detects SG for Pods configuration through multiple methods:
-- aws-node DaemonSet environment variables
-- amazon-vpc-cni ConfigMap settings
-- Runtime validation and logging
+1. **Node Bootstrap**: Karpenter creates node with EC2NodeClass userData
+2. **Instance Detection**: Script uses IMDSv2 to get instance type
+3. **maxPods Calculation**: Applies formula based on instance type
+4. **kubelet Start**: Launches kubelet with calculated maxPods value
+5. **Cluster Join**: Node joins the cluster with correct pod capacity
+6. **Background Validation**: Asynchronously detects and logs SG for Pods status
+
+### 4. Security Groups for Pods Detection (Post-Join Validation)
+
+After the node joins the cluster, a background script validates the configuration:
+- Checks aws-node DaemonSet environment variables
+- Verifies amazon-vpc-cni ConfigMap settings
+- Logs the detected configuration for troubleshooting
+- **Note**: This is for validation/logging only, not for calculation adjustment
 
 ## 📊 Validation Results
 
