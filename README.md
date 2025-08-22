@@ -35,6 +35,8 @@ This project provides **dynamic maxPods calculation** for Karpenter-managed node
 
 ## 📋 Supported Instance Types
 
+⚠️ **Note**: This solution currently supports a subset of AWS EC2 instance types. See the [Adding New Instance Types](#adding-new-instance-types) section below for guidance on extending support.
+
 ### 🚫 T3 Series (No Trunk ENI Support - No SG for Pods)
 | Instance Type | Default maxPods | ENI Reservation | Final maxPods | CPU | Memory |
 |---------------|-----------------|-----------------|---------------|-----|--------|
@@ -92,6 +94,181 @@ This project provides **dynamic maxPods calculation** for Karpenter-managed node
 | m6i.12xlarge | 234 | 54 | 180 | 48 vCPU | 192GB |
 | m6i.16xlarge | 737 | 108 | 629 | 64 vCPU | 256GB |
 | m6i.24xlarge | 737 | 108 | 629 | 96 vCPU | 384GB |
+
+## 🔧 Adding New Instance Types
+
+### Overview
+
+This solution currently supports a subset of AWS EC2 instance types. To add support for additional instance types, you need to research their ENI limits and trunk ENI compatibility, then update the configuration accordingly.
+
+### Step-by-Step Guide
+
+#### 1. Research Instance Type Specifications
+
+**Primary Resources:**
+- **AWS VPC Resource Controller limits.go**: https://github.com/aws/amazon-vpc-resource-controller-k8s/blob/main/pkg/aws/vpc/limits.go
+- **AWS EC2 Instance Types Documentation**: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-types.html
+- **AWS EKS Security Groups for Pods Documentation**: https://docs.aws.amazon.com/eks/latest/userguide/security-groups-for-pods.html
+
+**Key Information to Gather:**
+```bash
+# From limits.go file, find your instance type entry:
+"m7i.large": {
+    Interface:               3,           # Number of ENIs
+    IPv4PerInterface:        10,          # IPs per ENI  
+    IsTrunkingCompatible:    true,        # Trunk ENI support
+    BranchInterface:         9,           # Branch interfaces for SG for Pods
+    # ... other fields
+}
+```
+
+#### 2. Calculate maxPods Values
+
+**Formula for AWS default maxPods:**
+```bash
+# For most instance types:
+default_max_pods = (ENIs × IPs_per_ENI) - 1
+
+# Examples:
+# m7i.large: (3 × 10) - 1 = 29
+# c6i.xlarge: (4 × 15) - 1 = 59
+```
+
+**Calculate Reserved ENIs (for trunk ENI compatible instances):**
+```bash
+# Conservative approach: Reserve ~30% of total IPs for trunk interfaces
+reserved_enis = total_ips × 0.3
+
+# Or use the BranchInterface value from limits.go if available
+reserved_enis = BranchInterface_value
+```
+
+#### 3. Update Configuration Files
+
+**A. Update `ec2nodeclass.yaml` - Add Trunk ENI Compatibility Check:**
+```bash
+# In is_trunk_eni_compatible() function, add your instance family:
+case $instance_type in
+    # Add new series
+    "m7i.large"|"m7i.xlarge"|"m7i.2xlarge"|"m7i.4xlarge")
+        echo "true" ;;
+    # ... existing cases
+esac
+```
+
+**B. Update `ec2nodeclass.yaml` - Add Default maxPods Values:**
+```bash
+# In calculate_max_pods() function, add your instance types:
+case $instance_type in
+    # M7i series (example)
+    "m7i.large")    default_max_pods=29 ;;
+    "m7i.xlarge")   default_max_pods=58 ;;
+    "m7i.2xlarge")  default_max_pods=58 ;;
+    # ... existing cases
+esac
+```
+
+**C. Update `ec2nodeclass.yaml` - Add Reserved ENI Values:**
+```bash
+# In the reserved ENI calculation section:
+case $instance_type in
+    # M7i series reserved ENIs (example)
+    "m7i.large")    reserved_enis=9 ;;
+    "m7i.xlarge")   reserved_enis=18 ;;
+    "m7i.2xlarge")  reserved_enis=18 ;;
+    # ... existing cases
+esac
+```
+
+**D. Update `nodepool.yaml` - Add to Instance Type List:**
+```yaml
+spec:
+  requirements:
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values:
+        # Add new instance types here
+        - m7i.large
+        - m7i.xlarge
+        - m7i.2xlarge
+        # ... existing types
+```
+
+#### 4. Verification Resources
+
+**Test Your Calculations:**
+- Deploy a test pod on the new instance type
+- Check actual maxPods: `kubectl describe node <node-name> | grep pods`
+- Verify logs: `/var/log/karpenter-maxpods.log`
+
+**Cross-Reference with:**
+- **Karpenter Documentation**: https://karpenter.sh/docs/
+- **AWS CNI Plugin**: https://github.com/aws/amazon-vpc-cni-k8s
+- **EKS Best Practices**: https://aws.github.io/aws-eks-best-practices/
+
+### Example: Adding M7i Series Support
+
+```bash
+# 1. Research from limits.go:
+"m7i.large": {
+    Interface: 3,
+    IPv4PerInterface: 10,
+    IsTrunkingCompatible: true,
+    BranchInterface: 9,
+}
+
+# 2. Calculate values:
+default_max_pods = (3 × 10) - 1 = 29
+reserved_enis = 9  # From BranchInterface
+
+# 3. Add to configuration:
+# - Trunk ENI compatibility: true
+# - Default maxPods: 29
+# - Reserved ENIs: 9
+# - Final maxPods: 29 - 9 = 20
+```
+
+### Instance Type Research Checklist
+
+When adding a new instance type, verify:
+
+- [ ] **ENI Limits**: Number of ENIs and IPs per ENI
+- [ ] **Trunk ENI Support**: `IsTrunkingCompatible` value
+- [ ] **Branch Interfaces**: Available for Security Groups for Pods
+- [ ] **Generation**: Newer generations may have different limits
+- [ ] **Region Availability**: Instance type available in target regions
+- [ ] **Nitro System**: Most trunk ENI features require Nitro-based instances
+
+### Common Instance Families
+
+**Likely Trunk ENI Compatible (Research Required):**
+- M6a, M6i, M6id, M7i, M7a series
+- C6a, C6i, C6id, C7i, C7a series  
+- R6a, R6i, R6id, R7i, R7a series
+- X2iezn, X2idn, X2gd series
+- I4i, I4g series
+
+**Likely NOT Trunk ENI Compatible:**
+- All T-series (t2, t3, t4g)
+- Older generations (m4, c4, r4, etc.)
+- Some specialized instances
+
+### Getting Help
+
+If you need assistance adding support for specific instance types:
+
+1. **Check existing issues**: Look for similar requests
+2. **Create an issue**: Include instance type and use case
+3. **Provide research**: Share findings from limits.go and AWS docs
+4. **Test thoroughly**: Validate in non-production environment first
+
+### Contributing Back
+
+After successfully adding support for new instance types:
+1. Test thoroughly in your environment
+2. Update documentation and examples
+3. Submit a pull request with your changes
+4. Help others by sharing your research and validation results
 
 ## 🏗️ Architecture
 
