@@ -58,7 +58,7 @@ NODE_COUNT=$(echo "$V2_NODES" | grep -v '^$' | wc -l)
 
 if [ "$NODE_COUNT" -eq 0 ]; then
     echo -e "${YELLOW}⚠️  未发现v2节点，可能需要部署测试Pod触发节点创建${NC}"
-    echo "建议运行: kubectl apply -f test-pod.yaml"
+    echo "建议运行: kubectl apply -f test/test-pod.yaml"
 else
     echo -e "${GREEN}✅ 发现 $NODE_COUNT 个v2节点${NC}"
     echo "$V2_NODES"
@@ -217,7 +217,7 @@ echo "  - Security Groups for Pods检测: 请查看上述配置状态"
 echo -e "\n${YELLOW}💡 建议操作:${NC}"
 if [ "$NODE_COUNT" -eq 0 ]; then
     echo "1. 部署测试Pod触发节点创建:"
-    echo "   kubectl apply -f test-pod.yaml"
+    echo "   kubectl apply -f test/test-pod.yaml"
     echo "2. 等待节点创建完成后重新运行验证:"
     echo "   ./validation-script.sh"
 else

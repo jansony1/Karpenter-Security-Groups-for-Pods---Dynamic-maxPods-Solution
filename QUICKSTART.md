@@ -38,7 +38,7 @@ kubectl get nodepool m5-dynamic-nodepool-v2
 ### Step 5: Test
 ```bash
 # Deploy test pod
-kubectl apply -f test-pod.yaml
+kubectl apply -f test/test-pod.yaml
 
 # Watch node creation
 kubectl get nodeclaims -w

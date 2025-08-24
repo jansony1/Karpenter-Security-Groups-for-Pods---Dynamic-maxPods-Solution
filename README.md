@@ -95,7 +95,7 @@ kubectl get ec2nodeclass m5-dynamic-nodeclass-v2
 kubectl get nodepool m5-dynamic-nodepool-v2
 
 # Deploy test workload
-kubectl apply -f test-pod.yaml
+kubectl apply -f test/test-pod.yaml
 ```
 
 ### 3. Monitor Results
