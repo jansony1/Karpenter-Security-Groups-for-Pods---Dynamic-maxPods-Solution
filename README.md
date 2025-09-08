@@ -174,7 +174,49 @@ The solution **automatically supports ALL EC2 instance types** by querying live 
 - **Future-Proof**: Works with instance types that don't exist yet
 - **Fallback Support**: Conservative defaults for unknown types
 
-## 🧪 Testing
+## 🧪 Testing & Verification Results
+
+### ✅ Verified Instance Types and Results
+
+| Instance Type | maxPods | Trunk ENI | Calculation Formula | Verification Status |
+|---------------|---------|-----------|-------------------|-------------------|
+| **t3.2xlarge** | 59 | ❌ | (4×15)-1 = 59 | ✅ Verified |
+| **m5.2xlarge** | 40 | ✅ | Dynamic calculation | ✅ Verified |
+| **c5.xlarge** | 40 | ✅ | Dynamic calculation | ✅ Verified |
+
+📋 **[View Complete Verification Results](VERIFICATION_RESULTS.md)**
+
+### 🔍 Key Verification Commands
+
+```bash
+# Check node maxPods configuration
+kubectl describe node <node-name> | grep -E "(instance-type|pods)"
+
+# View calculation logs
+aws ssm send-command --instance-ids <instance-id> --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["cat /var/log/karpenter-maxpods.log"]' --region us-west-2
+
+# Verify kubelet parameters
+aws ssm send-command --instance-ids <instance-id> --document-name "AWS-RunShellScript" \
+  --parameters 'commands=["ps aux | grep kubelet | grep max-pods"]' --region us-west-2
+```
+
+### 📊 Sample Calculation Logs
+
+#### T3.2xlarge (No Trunk ENI Support)
+```
+Starting dynamic maxPods calculation for t3.2xlarge
+Instance t3.2xlarge does NOT support trunk ENI, no ENI reservation needed
+ENI Limits - Interfaces: 4, IPs per Interface: 15
+Default maxPods: 59, Reserved ENIs: 0, Final maxPods: 59
+```
+
+#### M5.2xlarge (Trunk ENI Compatible)
+```
+Instance Type: m5.2xlarge, Calculated Max Pods: 40
+Trunk ENI Compatible: true
+Security Groups for Pods detection completed
+```
 
 ### Run Validation Script
 
