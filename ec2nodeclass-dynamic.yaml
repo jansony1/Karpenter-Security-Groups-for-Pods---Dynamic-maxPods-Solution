@@ -82,26 +82,47 @@ spec:
     get_eni_limits() {
         local instance_type=$1
         
-        # Try to get from AWS VPC Resource Controller limits
-        local limits_url="https://raw.githubusercontent.com/aws/amazon-vpc-resource-controller-k8s/main/pkg/aws/vpc/limits.go"
-        local limits_content=$(curl -s --max-time 30 "$limits_url" 2>/dev/null)
+        # Try to get AWS official maxPods value first and reverse-engineer ENI limits
+        local aws_official_url="https://raw.githubusercontent.com/awslabs/amazon-eks-ami/main/nodeadm/internal/kubelet/eni-max-pods.txt"
+        local aws_maxpods=$(curl -s --max-time 30 "$aws_official_url" 2>/dev/null | grep "^$instance_type " | awk '{print $2}')
         
-        if [ ! -z "$limits_content" ]; then
-            local instance_config=$(echo "$limits_content" | grep -A 15 "\"$instance_type\":" | head -20)
+        if [ ! -z "$aws_maxpods" ]; then
+            # Reverse-engineer ENI parameters from AWS official maxPods value
+            # AWS formula: (ENI_count * IPv4_per_ENI) - 1 = maxPods
+            # So: ENI_count * IPv4_per_ENI = maxPods + 1
             
-            if [ ! -z "$instance_config" ]; then
-                local interface_count=$(echo "$instance_config" | grep "Interface:" | head -1 | sed 's/.*Interface:[[:space:]]*\([0-9]*\).*/\1/')
-                local ipv4_per_interface=$(echo "$instance_config" | grep "IPv4PerInterface:" | head -1 | sed 's/.*IPv4PerInterface:[[:space:]]*\([0-9]*\).*/\1/')
-                local branch_interface=$(echo "$instance_config" | grep "BranchInterface:" | head -1 | sed 's/.*BranchInterface:[[:space:]]*\([0-9]*\).*/\1/')
-                
-                if [ ! -z "$interface_count" ] && [ ! -z "$ipv4_per_interface" ]; then
-                    echo "$interface_count $ipv4_per_interface $branch_interface"
-                    return
-                fi
-            fi
+            local total_ips=$((aws_maxpods + 1))
+            
+            # Map common maxPods values to known ENI configurations
+            case $aws_maxpods in
+                4) echo "2 2 0" ;;       # t3.nano, t3.micro
+                8) echo "2 2 0" ;;       # t3.nano, t3.micro  
+                11) echo "3 4 0" ;;      # t3.small
+                17) echo "3 6 0" ;;      # t3.medium
+                29) echo "3 10 9" ;;     # m5.large, m6i.large (trunk ENI compatible)
+                35) echo "3 12 0" ;;     # t3.large (no trunk ENI)
+                58) echo "4 15 18" ;;    # c5.xlarge, r6i.2xlarge (trunk ENI compatible)
+                234) echo "8 30 54" ;;   # Large instances
+                737) echo "15 50 108" ;; # XL instances
+                *)
+                    # For unknown maxPods values, estimate based on total IPs
+                    if [ $total_ips -le 10 ]; then
+                        echo "2 5 2"
+                    elif [ $total_ips -le 20 ]; then
+                        echo "3 7 5"
+                    elif [ $total_ips -le 40 ]; then
+                        echo "3 15 10"
+                    elif [ $total_ips -le 60 ]; then
+                        echo "4 15 18"
+                    else
+                        echo "8 30 54"
+                    fi
+                    ;;
+            esac
+            return
         fi
         
-        # Fallback: Use AWS documentation patterns for common instance types
+        # Fallback: Use hardcoded patterns for common instance types
         case $instance_type in
             # T3 series
             t3.nano) echo "2 2 0" ;;
@@ -132,6 +153,26 @@ spec:
             c5.18xlarge) echo "15 50 108" ;;
             c5.24xlarge) echo "15 50 108" ;;
             
+            # M6i series
+            m6i.large) echo "3 10 9" ;;
+            m6i.xlarge) echo "4 15 18" ;;
+            m6i.2xlarge) echo "4 15 18" ;;
+            m6i.4xlarge) echo "8 30 54" ;;
+            m6i.8xlarge) echo "8 30 54" ;;
+            m6i.12xlarge) echo "8 30 54" ;;
+            m6i.16xlarge) echo "15 50 108" ;;
+            m6i.24xlarge) echo "15 50 108" ;;
+            
+            # R6i series
+            r6i.large) echo "3 10 9" ;;
+            r6i.xlarge) echo "4 15 18" ;;
+            r6i.2xlarge) echo "4 15 18" ;;
+            r6i.4xlarge) echo "8 30 54" ;;
+            r6i.8xlarge) echo "8 30 54" ;;
+            r6i.12xlarge) echo "8 30 54" ;;
+            r6i.16xlarge) echo "15 50 108" ;;
+            r6i.24xlarge) echo "15 50 108" ;;
+            
             # Default conservative values
             *) echo "3 10 5" ;;
         esac
@@ -143,7 +184,24 @@ spec:
         
         echo "$(date): Starting dynamic maxPods calculation for $instance_type" >> /var/log/karpenter-maxpods.log
         
-        # Get ENI limits
+        # Check trunk ENI compatibility first
+        local trunk_eni_compatible=$(is_trunk_eni_compatible $instance_type)
+        
+        if [ "$trunk_eni_compatible" = "false" ]; then
+            # For non-trunk ENI instances, use AWS official values directly
+            local aws_official_url="https://raw.githubusercontent.com/awslabs/amazon-eks-ami/main/nodeadm/internal/kubelet/eni-max-pods.txt"
+            local aws_maxpods=$(curl -s --max-time 30 "$aws_official_url" 2>/dev/null | grep "^$instance_type " | awk '{print $2}')
+            
+            if [ ! -z "$aws_maxpods" ]; then
+                echo "$(date): Instance $instance_type does NOT support trunk ENI, using AWS official value: $aws_maxpods" >> /var/log/karpenter-maxpods.log
+                echo $aws_maxpods
+                return
+            else
+                echo "$(date): Instance $instance_type not found in AWS official list, using fallback calculation" >> /var/log/karpenter-maxpods.log
+            fi
+        fi
+        
+        # For trunk ENI compatible instances or fallback, use dynamic calculation
         local eni_limits=$(get_eni_limits $instance_type)
         local interface_count=$(echo $eni_limits | cut -d' ' -f1)
         local ipv4_per_interface=$(echo $eni_limits | cut -d' ' -f2)
@@ -151,9 +209,6 @@ spec:
         
         # Calculate default maxPods using AWS formula
         local default_max_pods=$(( (interface_count * ipv4_per_interface) - 1 ))
-        
-        # Check trunk ENI compatibility
-        local trunk_eni_compatible=$(is_trunk_eni_compatible $instance_type)
         
         local adjusted_max_pods=$default_max_pods
         local reserved_enis=0
@@ -170,8 +225,6 @@ spec:
             adjusted_max_pods=$(( default_max_pods - reserved_enis ))
             
             echo "$(date): Instance $instance_type supports trunk ENI, reserving $reserved_enis ENIs" >> /var/log/karpenter-maxpods.log
-        else
-            echo "$(date): Instance $instance_type does NOT support trunk ENI, no ENI reservation needed" >> /var/log/karpenter-maxpods.log
         fi
         
         # Ensure minimum value of 10
