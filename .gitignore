@@ -42,3 +42,8 @@ kubeconfig
 local-test/
 scratch/
 tmp/
+
+# Test files (temporary)
+test-*.yaml
+*-test.yaml
+temp-*.yaml

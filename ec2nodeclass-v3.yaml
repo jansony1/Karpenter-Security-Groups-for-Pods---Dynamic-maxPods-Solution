@@ -1,0 +1,121 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: dynamic-maxpods-nodeclass-v3
+spec:
+  amiFamily: AL2
+  amiSelectorTerms:
+  - alias: al2@latest
+  blockDeviceMappings:
+  - deviceName: /dev/xvda
+    ebs:
+      deleteOnTermination: true
+      encrypted: true
+      volumeSize: 100Gi
+      volumeType: gp3
+  instanceProfile: KarpenterNodeInstanceProfile
+  securityGroupSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: nlb-test-cluster
+  subnetSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: nlb-test-cluster
+  tags:
+    ManagedBy: karpenter
+    Version: v3-sg-enabled-hardcoded
+  userData: |
+    #!/bin/bash
+
+    # Get instance type
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" --max-time 5 2>/dev/null)
+    INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s --max-time 5 "http://169.254.169.254/latest/meta-data/instance-type" 2>/dev/null)
+
+    # Get AWS official maxPods value
+    case "$INSTANCE_TYPE" in
+      # T series special rules
+      t2.*xlarge) AWS_MAXPODS=44 ;;
+      t*.large) AWS_MAXPODS=35 ;;
+      t*.medium) AWS_MAXPODS=17 ;;
+      t*.small) AWS_MAXPODS=11 ;;
+      *.nano|*.micro) AWS_MAXPODS=4 ;;
+      *.small) AWS_MAXPODS=11 ;;
+      *.medium) AWS_MAXPODS=8 ;;
+      *.large) AWS_MAXPODS=29 ;;
+      *.xlarge|*.2xlarge) AWS_MAXPODS=58 ;;
+      *.3xlarge|*.4xlarge|*.6xlarge|*.8xlarge|*.9xlarge|*.12xlarge) AWS_MAXPODS=234 ;;
+      *.16xlarge|*.18xlarge|*.24xlarge|*.32xlarge|*.48xlarge|*.metal*) AWS_MAXPODS=737 ;;
+    esac
+
+    # Check trunk ENI compatibility
+    case "$INSTANCE_TYPE" in
+        t1.*|t2.*|t3.*|t3a.*|t4g.*|m1.*|m2.*|m3.*|m4.*|c1.*|c3.*|c4.*|r3.*|r4.*|i2.*)
+            TRUNK_ENI_COMPATIBLE="false"
+            ;;
+        *)
+            TRUNK_ENI_COMPATIBLE="true"
+            ;;
+    esac
+
+    # Hardcode SG_ENABLED to true for testing ENI reservation logic
+    SG_ENABLED="true"
+
+    # Dynamic calculation
+    if [ "$TRUNK_ENI_COMPATIBLE" = "false" ]; then
+        # Non-trunk ENI: use AWS official value
+        MAX_PODS=$AWS_MAXPODS
+        LOGIC="non-trunk"
+    else
+        if [ "$SG_ENABLED" = "true" ]; then
+            # SG for Pods enabled: calculate maxPods = AWS_maxPods - pod-eni_capacity
+            # Based on actual test results and node allocatable resources
+            case "$INSTANCE_TYPE" in
+                # .large instances: typically reserve 9 ENIs for pod-eni
+                *.large) 
+                    POD_ENI_RESERVED=9
+                    MAX_PODS=$(( AWS_MAXPODS - POD_ENI_RESERVED ))
+                    ;;
+                # .xlarge instances: typically reserve 18 ENIs for pod-eni  
+                *.xlarge)
+                    POD_ENI_RESERVED=18
+                    MAX_PODS=$(( AWS_MAXPODS - POD_ENI_RESERVED ))
+                    ;;
+                # .2xlarge instances: typically reserve 38 ENIs for pod-eni
+                *.2xlarge)
+                    POD_ENI_RESERVED=38
+                    MAX_PODS=$(( AWS_MAXPODS - POD_ENI_RESERVED ))
+                    ;;
+                # .4xlarge instances: typically reserve 54 ENIs for pod-eni
+                *.4xlarge)
+                    POD_ENI_RESERVED=54
+                    MAX_PODS=$(( AWS_MAXPODS - POD_ENI_RESERVED ))
+                    ;;
+                *) 
+                    # Unknown instance size: use AWS official value as fallback
+                    MAX_PODS=$AWS_MAXPODS
+                    POD_ENI_RESERVED=0
+                    ;;
+            esac
+            
+            # Ensure minimum pods
+            [ $MAX_PODS -lt 10 ] && MAX_PODS=10
+            
+            if [ "$POD_ENI_RESERVED" -gt 0 ]; then
+                LOGIC="sg-enabled-calculated"
+            else
+                LOGIC="sg-enabled-fallback"
+            fi
+        else
+            # SG for Pods disabled: use AWS official value
+            MAX_PODS=$AWS_MAXPODS
+            LOGIC="sg-disabled"
+        fi
+    fi
+
+    # Ensure minimum
+    [ $MAX_PODS -lt 10 ] && MAX_PODS=10
+
+    # Log calculation
+    echo "$(date): $INSTANCE_TYPE AWS:$AWS_MAXPODS Trunk:$TRUNK_ENI_COMPATIBLE SG:$SG_ENABLED Logic:$LOGIC Reserved:$POD_ENI_RESERVED Final:$MAX_PODS" >> /var/log/dynamic-calc.log
+
+    # Bootstrap EKS
+    /etc/eks/bootstrap.sh nlb-test-cluster --kubelet-extra-args "--max-pods=$MAX_PODS"
