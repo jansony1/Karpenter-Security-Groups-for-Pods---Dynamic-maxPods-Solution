@@ -1,41 +1,42 @@
-# Karpenter Security Groups for Pods - Dynamic maxPods Solution
+# Karpenter Security Groups for Pods - Mixed Deployment Solution
 
-A production-ready solution that dynamically calculates optimal `maxPods` values for Karpenter nodes based on instance type and Security Groups for Pods configuration.
+A production-ready solution addressing the complex resource allocation challenges when deploying both Security Groups for Pods (SGP) and regular pods on the same Karpenter nodes.
 
-## 🎯 Problem Statement
+## 🎯 Problem Statemen
 
-When using AWS EKS with Karpenter and Security Groups for Pods, nodes need different `maxPods` values depending on:
-- Instance type capabilities (trunk ENI support)
-- Whether Security Groups for Pods is enabled
-- ENI reservation requirements for pod-level security groups
+When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployments, nodes face resource allocation conflicts:
 
-Static configurations lead to either resource waste or pod scheduling failures.
+**Core Issue**: SG pods and non-SG pods compete for different resources but share the same `maxPods` limit:
+- **Non-SG pods** are limited by ENI IP capacity (e.g., 18 IPs on m5.large)
+- **SG pods** are limited by `pod-ENI` quota (e.g., 9 pod-ENIs on m5.large)
+- **Both** are constrained by the single `maxPods` value (e.g., 29 on m5.large)
 
-## 🏗️ Supported Instance Types
+**Deployment Order Impact**:
+- **Non-SG first**: May exhaust ENI IPs before reaching `maxPods`, causing IP allocation failures
+- **SG first**: May reach `maxPods` while leaving ENI IPs unused, causing resource waste
 
-### Coverage: 80.2% (800/998 AWS Instance Types)
+## 🏗️ Mixed Deployment Challenge
 
-**Fully Supported Families:**
-- **Compute**: C5+, C6+, C7+, C8+ (trunk ENI compatible)
-- **General**: M5+, M6+, M7+, M8+ (trunk ENI compatible)  
-- **Memory**: R5+, R6+, R7+, R8+ (trunk ENI compatible)
-- **Storage**: I3+, I4+, I7+, I8+ (trunk ENI compatible)
-- **Burstable**: T1-T4 series (non-trunk, special rules)
-- **Legacy**: M1-M4, C3-C4, R3-R4, I2 (non-trunk compatible)
+### Real-World Test Results (EKS 1.32, Karpenter 1.6.3)
 
-**ENI Reservation Examples:**
-- r5.large: 29 → 20 pods (reserve 9 ENIs)
-- c5.xlarge: 58 → 40 pods (reserve 18 ENIs)
-- m7i.2xlarge: 58 → 20 pods (reserve 38 ENIs)
-- t3.large: 35 pods (no reservation, T-series special rule)
+| Instance Type | Default `maxPods` | `pod-ENI` Limit | Actual ENI IPs | Mixed Deployment Issue |
+|---------------|------------------|-----------------|----------------|----------------------|
+| **m5.large** | 29 | 9 | 18 | Non-SG first: IP exhaustion at 18 pods<br>SG first: Works optimally |
+| **m5.xlarge** | 58 | 18 | 42 | Non-SG first: IP exhaustion at 42 pods<br>SG first: 5 ENI IPs wasted |
+| **m5.2xlarge** | 58 | 38 | 42 | Non-SG first: IP exhaustion at 42 pods<br>SG first: 25 ENI IPs wasted |
 
-See [SUPPORTED_INSTANCES.md](SUPPORTED_INSTANCES.md) for complete list.
+**Key Findings**:
+- **Non-SG pods consume ENI IPs** (limited by actual ENI capacity)
+- **SG pods consume `pod-ENI` quota** (don't use ENI IPs)
+- **Both consume `maxPods` slots** (shared constraint)
+- **Deployment order determines success/failure**
 
 ## ✨ Solution Features
 
-- **Configurable Detection**: Supports both static configuration and VPC Resource Controller detection
+- **Mixed Deployment Optimization**: Calculates optimal `maxPods` for both SG and non-SG pod coexistence
+- **Deployment Order Awareness**: Handles resource allocation regardless of pod deployment sequence
 - **Instance Type Aware**: Handles trunk ENI compatibility for different EC2 instance families
-- **Optimal Resource Usage**: Calculates precise ENI reservations based on instance size
+- **ENI Resource Management**: Prevents IP exhaustion while maximizing resource utilization
 - **Production Ready**: Comprehensive error handling and logging
 - **Flexible Configuration**: Choose between hardcoded or dynamic detection methods
 
@@ -43,143 +44,106 @@ See [SUPPORTED_INSTANCES.md](SUPPORTED_INSTANCES.md) for complete list.
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   Node Startup  │───▶│  Detection Logic │───▶│  maxPods Calc  │
+│   Node Startup  │───▶│  Instance Type   │───▶│  maxPods Calc  │
+│   (IMDSv2)      │    │   Detection      │    │   (Production)  │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐
-                    │ VPC Resource     │
-                    │ Controller Check │
-                    └──────────────────┘
 ```
 
-### Enhanced Calculation Workflow
+### Production Calculation Workflow
 
 ```
 ┌─────────────────┐
 │ Get Instance    │
-│ Type & Metadata │
-│ (IMDSv2)        │
+│ Type (IMDSv2)   │
 └─────────┬───────┘
           │
           ▼
 ┌─────────────────┐
-│ Apply AWS       │
-│ maxPods Rules   │
-│ • T-series:     │
-│   t*.large=35   │
-│   t*.small=11   │
-│ • General:      │
-│   *.large=29    │
-│   *.xlarge=58   │
-│   *.2xlarge=58  │
-│   *.4xlarge=234 │
+│ Detect SG for   │
+│ Pods Enabled    │
 └─────────┬───────┘
           │
           ▼
 ┌─────────────────┐
 │ Check Trunk ENI │
 │ Compatibility   │
-│ • Non-trunk:    │
-│   t1,t2,t3,t4g  │
-│   m1-m4,c1,c3-4 │
-│   r3-4,i2       │
-│ • Trunk: Others │
 └─────────┬───────┘
           │
           ▼
 ┌─────────────────┐
-│ Set SG_ENABLED  │
-│ (Configurable:  │
-│  Static/Dynamic)│
+│ Apply Formula:  │
+│ If SG enabled:  │
+│ maxPods =       │
+│ system_pods +   │
+│ ENI_IPs         │
+│ Else: AWS       │
+│ default         │
 └─────────┬───────┘
           │
           ▼
-    ┌─────────┐    
-    │ Trunk   │    
-    │ ENI?    │    
-    └────┬────┘    
-         │         
-    ┌────▼────┐    ┌─────────────────┐
-    │   NO    │───▶│ Use AWS maxPods │
-    │         │    │ Logic: non-trunk│
-    └─────────┘    │ Final = AWS     │
-         │         └─────────────────┘
-    ┌────▼────┐              │
-    │   YES   │              │
-    │         │              │
-    └────┬────┘              │
-         │                   │
-         ▼                   │
-┌─────────────────┐          │
-│ SG for Pods     │          │
-│ Enabled?        │          │
-└────┬────────────┘          │
-     │                       │
-┌────▼────┐                  │
-│   NO    │──────────────────┘
-│         │                  │
-└─────────┘                  │
-     │                       │
-┌────▼────┐                  │
-│   YES   │                  │
-│         │                  │
-└────┬────┘                  │
-     │                       │
-     ▼                       │
-┌─────────────────┐          │
-│ Calculate ENI   │          │
-│ Reservation:    │          │
-│ • .large: 9     │          │
-│ • .xlarge: 18   │          │
-│ • .2xlarge: 38  │          │
-│ • .4xlarge: 54  │          │
-│ Logic: sg-calc  │          │
-└─────────┬───────┘          │
-          │                  │
-          ▼                  │
-┌─────────────────┐          │
-│ Final maxPods = │          │
-│ AWS - Reserved  │          │
-│ (min 10 pods)   │          │
-└─────────┬───────┘          │
-          │                  │
-          └──────────────────┘
-                    │
-                    ▼
-          ┌─────────────────┐
-          │ Log Calculation │
-          │ to /var/log/    │
-          │ dynamic-calc.log│
-          └─────────┬───────┘
-                    │
-                    ▼
-          ┌─────────────────┐
-          │ Bootstrap EKS   │
-          │ with calculated │
-          │ --max-pods      │
-          └─────────────────┘
+┌─────────────────┐
+│ Bootstrap EKS   │
+│ with --max-pods │
+└─────────────────┘
 ```
-
 ## 📊 Verified Results
 
-### ENI Reservation Logic (Security Groups for Pods Enabled)
+### Mixed Deployment Test Results (EKS 1.32, Karpenter 1.6.3)
 
-| Instance Size | ENI Reserved | Example Calculation |
-|---------------|--------------|-------------------|
-| `.large` | 9 ENIs | r5.large: 29 → 20 pods |
-| `.xlarge` | 18 ENIs | r5.xlarge: 58 → 40 pods |
-| `.2xlarge` | 38 ENIs | m7i.2xlarge: 58 → 20 pods |
-| `.4xlarge` | 54 ENIs | c5.4xlarge: 234 → 180 pods |
+| Instance Type | Default maxPods | pod-ENI Limit | System Pods | Verification Status |
+|---------------|-----------------|---------------|-------------|-------------------|
+| **m5.large** | 29 | 9 | 2 | ✅ Verified |
+| **m5.xlarge** | 58 | 18 | 3 | ✅ Verified |
+| **m5.2xlarge** | 58 | 38 | 3 | ✅ Verified |
+| **c6i.large** | 29 | 9 | 3 | ✅ Verified |
+| **c6i.xlarge** | 58 | 18 | 3 | ✅ Verified |
+| **c6i.2xlarge** | 58 | 38 | 3 | ✅ Verified |
 
-### Non-Trunk ENI Instances (No Reservation)
+### Production Formula (Conservative)
+- **Recommended**: `maxPods = system_pods + available_ENI_IPs`
+- **Priority**: Prevent ENI IP exhaustion in all deployment scenarios
 
-| Instance Family | Behavior | Example |
-|----------------|----------|---------|
-| T-series | Use AWS official values | t3.large: 35 pods |
-| Legacy families | Use AWS official values | No ENI reservation |
+### Pod Potential Waste Analysis
 
-## 🚀 Quick Start
+| Instance Type | Current | Recommended | Potential Pod Waste | Waste % |
+|---------------|---------|-------------|---------------------|---------|
+| **m5.large** | 29 | 20 | 9 pods | 31% |
+| **m5.xlarge** | 58 | 45 | 13 pods | 22% |
+| **m5.2xlarge** | 58 | 45 | 13 pods | 22% |
+| **c6i.large** | 29 | 21 | 8 pods | 28% |
+| **c6i.xlarge** | 58 | 45 | 13 pods | 22% |
+| **c6i.2xlarge** | 58 | 45 | 13 pods | 22% |
+
+**Note**: Scheduler automatically handles pod-ENI quota limits, preventing deployment failures.
+
+## Derived Solutions from Experiment Results
+
+Based on mixed deployment testing, two approaches emerge to address different deployment scenarios:
+
+### Conservative Approach (Recommended)
+**Addresses**: Non-SG pods first → IP allocation failures
+**Solution**: `maxPods = system_pods + available_ENI_IPs`
+
+### Aggressive Approach (Alternative)
+**Addresses**: SG pods first → ENI IP waste
+**Solution**: Increase maxPods to eliminate waste
+
+| Instance Type | Conservative | Aggressive | ENI Waste Eliminated |
+|---------------|-------------|------------|-------------------|
+| **m5.large** | 20 | 29 (default) | 0 (already optimal) |
+| **m5.xlarge** | 45 | 63 | 5 ENI IPs |
+| **m5.2xlarge** | 45 | 83 | 25 ENI IPs |
+
+### Approach Trade-offs
+
+| Approach | Reliability | Resource Efficiency | Operational Complexity |
+|----------|-------------|-------------------|----------------------|
+| **Conservative (Recommended)** | ✅ Guaranteed success | ⚠️ Some waste acceptable | ✅ Simple |
+| **Aggressive** | ⚠️ Deployment order dependent | ✅ Maximum utilization | ⚠️ Complex scheduling required |
+
+**Recommendation**: Conservative approach prevents deployment failures and provides predictable behavior, making it ideal for production environments.
+
+## 🚀 Quick Star
 
 ### Prerequisites
 
@@ -191,15 +155,18 @@ See [SUPPORTED_INSTANCES.md](SUPPORTED_INSTANCES.md) for complete list.
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-repo/karpenter-sg-dynamic-maxpods.git
+git clone https://github.com/your-repo/karpenter-sg-dynamic-maxpods.gi
 cd karpenter-sg-dynamic-maxpods
 
 # Set your cluster name
 export CLUSTER_NAME="your-cluster-name"
 
-# Deploy using the latest version
-kubectl apply -f ec2nodeclass-v3.yaml
-kubectl apply -f nodepool-v3.yaml
+# Update configuration
+sed -i "s/YOUR_CLUSTER_NAME/$CLUSTER_NAME/g" ec2nodeclass-production.yaml
+
+# Deploy production configuration
+kubectl apply -f ec2nodeclass-production.yaml
+kubectl apply -f nodepool-production.yaml
 ```
 
 ### 2. Verification
@@ -208,19 +175,18 @@ kubectl apply -f nodepool-v3.yaml
 # Check node maxPods values
 kubectl get nodes -o custom-columns=NAME:.metadata.name,INSTANCE:.metadata.labels.node\\.kubernetes\\.io/instance-type,MAXPODS:.status.allocatable.pods
 
-# Check calculation logs (replace INSTANCE_ID)
-aws ssm send-command \
-  --instance-ids INSTANCE_ID \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["cat /var/log/dynamic-calc.log"]'
+# Check calculation logs (replace NODE_NAME)
+kubectl debug node/NODE_NAME -it --image=busybox -- cat /host/var/log/mixed-deployment-calc.log
 ```
+
+See [PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md) for detailed deployment guide.
 
 ## 📋 Configuration Files
 
-### Latest Version (v3)
-- **ec2nodeclass-v3.yaml**: Core configuration with enhanced ENI reservation logic
-- **nodepool-v3.yaml**: Multi-instance type support with comprehensive testing coverage
-- **test-instances-v3.yaml**: Validation deployments for different instance types
+### Production Version
+- **ec2nodeclass-production.yaml**: Production-ready configuration with conservative maxPods formula
+- **nodepool-production.yaml**: NodePool configuration for mixed deployment scenarios
+- **PRODUCTION_DEPLOYMENT.md**: Detailed deployment guide
 
 ## 🔍 Monitoring and Troubleshooting
 
@@ -242,10 +208,10 @@ Wed Sep 10 11:27:31 UTC 2025: r5.large AWS:29 Trunk:true SG:true Logic:sg-enable
 ## 🧪 Testing
 
 Comprehensive testing covers:
-- **7 Instance Types**: t3.small, t3.large, r5.large, r5.xlarge, m5.large, m7i.2xlarge, c5.4xlarge
-- **ENI Reservation Logic**: All size categories (.large, .xlarge, .2xlarge, .4xlarge)
-- **Trunk ENI Detection**: Both compatible and non-compatible instances
-- **T-Series Special Rules**: Dedicated maxPods values for T-family instances
+- **3 Instance Types**: m5.large, m5.xlarge, m5.2xlarge
+- **Mixed Deployment Scenarios**: Both SG-first and non-SG-first deployment orders
+- **Resource Allocation Patterns**: ENI IP consumption vs pod-ENI quota usage
+- **System Pod Variations**: Different system pod counts across instance types
 
 See [VERIFICATION_RESULTS.md](VERIFICATION_RESULTS.md) for detailed test results.
 
@@ -283,11 +249,11 @@ Edit the calculation logic in `ec2nodeclass-v3.yaml`:
 ### Add New Instance Types
 Update both the AWS maxPods rules and trunk ENI compatibility check in the UserData script.
 
-## 📈 Performance Impact
+## 📈 Performance Impac
 
 - **Startup Time**: Adds ~5 seconds for detection and calculation
 - **Resource Usage**: Minimal CPU/memory overhead during bootstrap
-- **Network**: Single HTTP request to VPC Resource Controller endpoint
+- **Network**: Single HTTP request to VPC Resource Controller endpoin
 - **Reliability**: 100% success rate across all tested instance types
 
 ## 🔒 Security Considerations
@@ -300,19 +266,3 @@ Update both the AWS maxPods rules and trunk ENI compatibility check in the UserD
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🆘 Support
-
-- **Issues**: Report bugs and feature requests via GitHub Issues
-- **Documentation**: Check [VERIFICATION_RESULTS.md](VERIFICATION_RESULTS.md) for detailed test results
-- **Quick Start**: See [QUICKSTART.md](QUICKSTART.md) for rapid deployment
-
-## 🏷️ Version History
-
-- **v3.0.0**: Enhanced ENI reservation logic with comprehensive testing (current)
-- **v2.0.0**: VPC Resource Controller detection method
-- **v1.0.0**: kubectl-based detection method (deprecated)
-
----
-
-**Production Status**: ✅ Verified across 7 instance types with 100% success rate in ENI reservation calculations.

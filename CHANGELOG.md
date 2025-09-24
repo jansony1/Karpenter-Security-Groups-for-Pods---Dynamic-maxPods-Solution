@@ -12,7 +12,7 @@
 
 #### 2. Security Groups for Pods自动检测
 - **新增**: 自动检测集群是否启用Security Groups for Pods
-- **检测方法**: 
+- **检测方法**:
   - aws-node DaemonSet的ENABLE_POD_ENI环境变量
   - amazon-vpc-cni ConfigMap的enable-pod-eni配置
 - **后台验证**: 节点加入集群后异步验证配置
@@ -85,7 +85,7 @@ v2/
 
 #### 验证的实例类型
 - **c5.large**: maxPods=20 ✅ 验证通过
-- **m5.xlarge**: maxPods=40 ✅ 验证通过  
+- **m5.xlarge**: maxPods=40 ✅ 验证通过
 - **t3.2xlarge**: maxPods=40 ✅ 验证通过
 
 #### 验证的功能
@@ -128,6 +128,6 @@ cd /Users/zhenyin/sg-with-karpenter/v2/
 
 ---
 
-**发布日期**: 2025-08-21  
-**基于版本**: v1.0.0  
+**发布日期**: 2025-08-21
+**基于版本**: v1.0.0
 **兼容性**: Kubernetes 1.30+, Karpenter v1.x

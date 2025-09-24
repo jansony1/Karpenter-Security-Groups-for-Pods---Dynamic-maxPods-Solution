@@ -1,4 +1,4 @@
-# Pull Request
+# Pull Reques
 
 ## Description
 Brief description of the changes in this PR.
@@ -19,18 +19,18 @@ Brief description of the changes in this PR.
 
 ## Instance Types Affected
 - [ ] T3 series
-- [ ] M5 series  
+- [ ] M5 series
 - [ ] C5 series
 - [ ] R5 series
 - [ ] M6i series
 - [ ] Other: ___________
 
 ## Testing
-- [ ] Tested in development environment
+- [ ] Tested in development environmen
 - [ ] Tested with Security Groups for Pods enabled
 - [ ] Tested with Security Groups for Pods disabled
 - [ ] Validated YAML syntax
-- [ ] Ran validation script
+- [ ] Ran validation scrip
 - [ ] Updated documentation
 
 ## Test Results
@@ -39,7 +39,7 @@ Brief description of the changes in this PR.
 kubectl describe node <node-name> | grep -E "(instance-type|pods)"
 ```
 
-## Checklist
+## Checklis
 - [ ] My code follows the project's style guidelines
 - [ ] I have performed a self-review of my code
 - [ ] I have made corresponding changes to the documentation

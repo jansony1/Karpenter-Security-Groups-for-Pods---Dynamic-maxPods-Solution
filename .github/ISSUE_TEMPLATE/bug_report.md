@@ -1,5 +1,5 @@
 ---
-name: Bug report
+name: Bug repor
 about: Create a report to help us improve
 title: '[BUG] '
 labels: 'bug'
@@ -35,7 +35,7 @@ Please include relevant logs:
 # Karpenter maxPods calculation logs
 /var/log/karpenter-maxpods.log
 
-# Security Groups for Pods detection logs  
+# Security Groups for Pods detection logs
 /var/log/sg-pods-check.log
 
 # Karpenter controller logs

@@ -29,7 +29,7 @@ Thank you for your interest in contributing! We welcome contributions from the c
 1. **Fork the repository**
 2. **Create a feature branch**: `git checkout -b feature/your-feature-name`
 3. **Make your changes**
-4. **Test thoroughly** using the validation script
+4. **Test thoroughly** using the validation scrip
 5. **Commit and push**: `git commit -m "feat: description" && git push`
 6. **Create a Pull Request**
 
@@ -46,7 +46,7 @@ Look for your instance type entry:
 "m7i.large": {
     Interface:               3,           // Number of ENIs
     IPv4PerInterface:        10,          // IPs per ENI
-    IsTrunkingCompatible:    true,        // Security Groups for Pods support
+    IsTrunkingCompatible:    true,        // Security Groups for Pods suppor
     BranchInterface:         9,           // Available branch interfaces
     DefaultNetworkCardIndex: 0,
     NetworkCards: []NetworkCard{
@@ -100,7 +100,7 @@ case $instance_type in
     # M7i series - supports trunk ENI (example)
     "m7i.large"|"m7i.xlarge"|"m7i.2xlarge"|"m7i.4xlarge"|"m7i.8xlarge"|"m7i.12xlarge"|"m7i.16xlarge"|"m7i.24xlarge")
         echo "true" ;;
-    # C7i series - supports trunk ENI (example)  
+    # C7i series - supports trunk ENI (example)
     "c7i.large"|"c7i.xlarge"|"c7i.2xlarge"|"c7i.4xlarge"|"c7i.8xlarge"|"c7i.12xlarge"|"c7i.16xlarge"|"c7i.24xlarge")
         echo "true" ;;
     # T4g series - does NOT support trunk ENI (example)
@@ -168,10 +168,10 @@ spec:
 
 ### Testing Phase
 
-#### 1. Validation Checklist
+#### 1. Validation Checklis
 
 - [ ] **Syntax Check**: Validate YAML files with `kubectl --dry-run=client`
-- [ ] **Deploy Test**: Deploy in non-production environment
+- [ ] **Deploy Test**: Deploy in non-production environmen
 - [ ] **Instance Creation**: Verify Karpenter creates the new instance type
 - [ ] **maxPods Verification**: Check actual maxPods matches calculation
 - [ ] **Log Verification**: Confirm logs show correct trunk ENI detection
@@ -194,7 +194,7 @@ spec:
   nodeSelector:
     node-type: m5-dynamic-v2
   containers:
-  - name: test
+  - name: tes
     image: nginx:alpine
     resources:
       requests:
@@ -210,10 +210,10 @@ kubectl describe node <node-name> | grep -E "(instance-type|pods)"
 
 # Check calculation logs
 INSTANCE_ID=$(kubectl get node <node-name> -o jsonpath='{.spec.providerID}' | cut -d'/' -f5)
-aws ssm send-command \
-  --instance-ids $INSTANCE_ID \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["cat /var/log/karpenter-maxpods.log"]' \
+aws ssm send-command
+  --instance-ids $INSTANCE_ID
+  --document-name "AWS-RunShellScript"
+  --parameters 'commands=["cat /var/log/karpenter-maxpods.log"]'
   --region us-west-2
 ```
 
@@ -267,7 +267,7 @@ spec:
 
 #### Likely Trunk ENI Compatible
 - **M7i/M7a**: Latest generation general purpose
-- **C7i/C7a**: Latest generation compute optimized  
+- **C7i/C7a**: Latest generation compute optimized
 - **R7i/R7a**: Latest generation memory optimized
 - **M6a/M6id**: Previous generation variants
 - **C6a/C6id**: Previous generation variants
@@ -299,11 +299,11 @@ spec:
 
 When submitting a PR for new instance types:
 
-#### 1. PR Title Format
+#### 1. PR Title Forma
 ```
 feat: add support for M7i instance series
 
-- Add M7i.large through M7i.24xlarge support
+- Add M7i.large through M7i.24xlarge suppor
 - Include trunk ENI compatibility detection
 - Update documentation and test configurations
 ```
@@ -311,7 +311,7 @@ feat: add support for M7i instance series
 #### 2. Required Information
 - [ ] **Research source**: Link to limits.go commit or AWS documentation
 - [ ] **Calculation details**: Show how maxPods and reserved ENI values were determined
-- [ ] **Test results**: Include validation output from real deployment
+- [ ] **Test results**: Include validation output from real deploymen
 - [ ] **Documentation updates**: README tables and examples updated
 
 #### 3. Testing Evidence

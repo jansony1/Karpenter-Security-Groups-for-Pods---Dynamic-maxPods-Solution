@@ -1,0 +1,101 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: mixed-deployment-nodeclass
+spec:
+  amiFamily: AL2
+  amiSelectorTerms:
+  - alias: al2@lates
+  blockDeviceMappings:
+  - deviceName: /dev/xvda
+    ebs:
+      deleteOnTermination: true
+      encrypted: true
+      volumeSize: 100Gi
+      volumeType: gp3
+  instanceProfile: KarpenterNodeInstanceProfile
+  securityGroupSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: YOUR_CLUSTER_NAME
+  subnetSelectorTerms:
+  - tags:
+      karpenter.sh/discovery: YOUR_CLUSTER_NAME
+  tags:
+    ManagedBy: karpenter
+    Version: production-mixed-deploymen
+  userData: |
+    #!/bin/bash
+
+    # Get instance metadata using IMDSv2
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" --max-time 5 2>/dev/null)
+    INSTANCE_TYPE=$(curl -H "X-aws-ec2-metadata-token: $TOKEN" -s --max-time 5 "http://169.254.169.254/latest/meta-data/instance-type" 2>/dev/null)
+
+    # Step 1: Detect SG for Pods enabled
+    # Hardcode SG_ENABLED to true for  ENI reservation logic
+    SG_ENABLED="true"
+
+    # Step 2: Check trunk ENI compatibility
+    case "$INSTANCE_TYPE" in
+        t1.*|t2.*|t3.*|t3a.*|t4g.*|m1.*|m2.*|m3.*|m4.*|c1.*|c3.*|c4.*|r3.*|r4.*|i2.*)
+            TRUNK_ENI_COMPATIBLE="false"
+            ;;
+        *)
+            TRUNK_ENI_COMPATIBLE="true"
+            ;;
+    esac
+
+    # Step 3: Apply formula based on SG status and trunk ENI suppor
+    if [ "$SG_ENABLED" = "true" ] && [ "$TRUNK_ENI_COMPATIBLE" = "true" ]; then
+        # Production formula: maxPods = system_pods + available_ENI_IPs
+        # Conservative approach to prevent deployment failures in mixed deployments
+
+        # Fixed system pods value - modify based on production environmen
+        SYSTEM_PODS=3  # Adjust this value based on your production system pod coun
+
+        case "$INSTANCE_TYPE" in
+            # Verified instance types with ENI IP counts
+            *.large)
+                ENI_IPS=18
+                MAX_PODS=$(( SYSTEM_PODS + ENI_IPS ))
+                ;;
+            *.xlarge)
+                ENI_IPS=42
+                MAX_PODS=$(( SYSTEM_PODS + ENI_IPS ))
+                ;;
+            *.2xlarge)
+                ENI_IPS=42
+                MAX_PODS=$(( SYSTEM_PODS + ENI_IPS ))
+                ;;
+            *.4xlarge)
+                ENI_IPS=203
+                MAX_PODS=$(( SYSTEM_PODS + ENI_IPS ))
+                ;;
+            # Add other instance types as needed
+            # Format: SYSTEM_PODS + available_ENI_IPs
+            *)
+                echo "Error: Unsupported instance type $INSTANCE_TYPE"
+                exit 1
+        ;;
+        esac
+        LOGIC="sg-enabled-calculated"
+    else
+        # Use AWS default maxPods for non-SG or non-trunk instances
+        case "$INSTANCE_TYPE" in
+            *.large) MAX_PODS=29 ;;
+            *.xlarge|*.2xlarge) MAX_PODS=58 ;;
+            *.4xlarge) MAX_PODS=234 ;;
+            *) MAX_PODS=29 ;;
+        esac
+        SYSTEM_PODS="n/a"
+        ENI_IPS="n/a"
+        LOGIC="aws-default"
+    fi
+
+    # Ensure minimum
+    [ $MAX_PODS -lt 10 ] && MAX_PODS=10
+
+    # Log calculation for monitoring
+    echo "$(date): $INSTANCE_TYPE SG:$SG_ENABLED Trunk:$TRUNK_ENI_COMPATIBLE SystemPods:$SYSTEM_PODS ENI_IPs:$ENI_IPS Final:$MAX_PODS Logic:$LOGIC" >> /var/log/mixed-deployment-calc.log
+
+    # Bootstrap EKS with calculated maxPods
+    /etc/eks/bootstrap.sh YOUR_CLUSTER_NAME --kubelet-extra-args "--max-pods=$MAX_PODS"

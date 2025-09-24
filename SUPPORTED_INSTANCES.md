@@ -13,7 +13,7 @@
 - **Trunk ENI**: c5+ (trunk compatible), c3-c4 (non-trunk)
 - **Examples**: c5.large (29→20), c5.xlarge (58→40), c5.4xlarge (234→180)
 
-### General Purpose (M-Series)  
+### General Purpose (M-Series)
 - **Families**: m1, m2, m3, m4, m5, m6, m7, m8
 - **Trunk ENI**: m5+ (trunk compatible), m1-m4 (non-trunk)
 - **Examples**: m5.large (29→20), m7i.2xlarge (58→20)
@@ -33,11 +33,11 @@
 - **Trunk ENI**: All non-trunk compatible
 - **Special maxPods Values**:
   - t2.*xlarge: 44 pods
-  - t*.large: 35 pods  
+  - t*.large: 35 pods
   - t*.medium: 17 pods
   - t*.small: 11 pods
 
-### GPU Instances (G-Series) - Partial Support
+### GPU Instances (G-Series) - Partial Suppor
 - **Families**: g5, g6 (partial support)
 - **Trunk ENI**: Most are trunk compatible
 - **Note**: g4ad, g4dn require special handling (not covered)
@@ -71,7 +71,7 @@ Others: 11 pods → 11 pods (no trunk ENI) or 11-X pods (with ENI reservation)
 
 ### Medium (8 pods)
 ```
-*.medium → 8 pods  
+*.medium → 8 pods
 T-series: Use special rule (17 pods)
 Others: 8 pods → 8 pods (no trunk ENI) or 8-X pods (with ENI reservation)
 ```
@@ -87,7 +87,7 @@ Non-trunk ENI: 29 pods
 ### XLarge/2XLarge (58 pods)
 ```
 *.xlarge, *.2xlarge → 58 pods
-Trunk ENI + SG enabled: 
+Trunk ENI + SG enabled:
   - .xlarge: 58 - 18 = 40 pods
   - .2xlarge: 58 - 38 = 20 pods
 Non-trunk ENI: 58 pods
@@ -150,7 +150,7 @@ No ENI reservation applied, use AWS official values:
 
 ### Tested Instance Types ✅
 - t3.small (11 pods) - Non-trunk ENI
-- t3.large (35 pods) - Non-trunk ENI  
+- t3.large (35 pods) - Non-trunk ENI
 - r5.large (29→20 pods) - Trunk ENI with reservation
 - r5.xlarge (58→40 pods) - Trunk ENI with reservation
 - m5.large (29→20 pods) - Trunk ENI with reservation
@@ -164,15 +164,15 @@ No ENI reservation applied, use AWS official values:
 
 ## Usage Recommendations
 
-### Production Deployment
+### Production Deploymen
 Use supported instance families for reliable maxPods calculation:
 ```yaml
 nodeRequirements:
   - key: node.kubernetes.io/instance-type
     operator: In
-    values: 
+    values:
       - "c5.large"    # 29→20 pods
-      - "c5.xlarge"   # 58→40 pods  
+      - "c5.xlarge"   # 58→40 pods
       - "m5.large"    # 29→20 pods
       - "r5.large"    # 29→20 pods
       - "r5.xlarge"   # 58→40 pods

@@ -1,6 +1,6 @@
 ---
-name: Feature request
-about: Suggest an idea for this project
+name: Feature reques
+about: Suggest an idea for this projec
 title: '[FEATURE] '
 labels: 'enhancement'
 assignees: ''
@@ -30,6 +30,6 @@ Add any other context or screenshots about the feature request here.
 
 **Priority**
 - [ ] Critical - blocking current work
-- [ ] High - would significantly improve workflow  
-- [ ] Medium - nice to have improvement
-- [ ] Low - minor enhancement
+- [ ] High - would significantly improve workflow
+- [ ] Medium - nice to have improvemen
+- [ ] Low - minor enhancemen
