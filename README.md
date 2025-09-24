@@ -2,7 +2,7 @@
 
 A production-ready solution addressing the complex resource allocation challenges when deploying both Security Groups for Pods (SGP) and regular pods on the same Karpenter nodes.
 
-## 🎯 Problem Statemen
+## 🎯 Problem Statement
 
 When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployments, nodes face resource allocation conflicts:
 
@@ -13,7 +13,7 @@ When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployme
 
 **Deployment Order Impact**:
 - **Non-SG first**: May exhaust ENI IPs before reaching `maxPods`, causing IP allocation failures
-- **SG first**: May reach `maxPods` while leaving ENI IPs unused, causing resource waste
+- **SG first**: May reach `maxPods` while leaving ENI IPs unused, causing resource waste 1
 
 ## 🏗️ Mixed Deployment Challenge
 
@@ -30,6 +30,36 @@ When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployme
 - **SG pods consume `pod-ENI` quota** (don't use ENI IPs)
 - **Both consume `maxPods` slots** (shared constraint)
 - **Deployment order determines success/failure**
+
+## 📊 Verified Results
+
+### Mixed Deployment Test Results (EKS 1.32, Karpenter 1.6.3)
+
+| Instance Type | Default maxPods | pod-ENI Limit | System Pods | Verification Status |
+|---------------|-----------------|---------------|-------------|-------------------|
+| **m5.large** | 29 | 9 | 2 | ✅ Verified |
+| **m5.xlarge** | 58 | 18 | 3 | ✅ Verified |
+| **m5.2xlarge** | 58 | 38 | 3 | ✅ Verified |
+| **c6i.large** | 29 | 9 | 3 | ✅ Verified |
+| **c6i.xlarge** | 58 | 18 | 3 | ✅ Verified |
+| **c6i.2xlarge** | 58 | 38 | 3 | ✅ Verified |
+
+### Production Formula (Conservative)
+- **Recommended**: `maxPods = system_pods + available_ENI_IPs`
+- **Priority**: Prevent ENI IP exhaustion in all deployment scenarios
+
+### Resource Potential Waste Analysis
+
+| Instance Type | Default maxPods | Recommended maxPods | pod-ENI Limit | Available ENI IPs | System Pods | MaxPods Potential Waste | ENI IP Potential Waste |
+|---------------|-----------------|-------------------|---------------|-----------------|-------------|------------------------|----------------------|
+| **m5.large** | 29 | 20 | 9 | 18 | 2 | 9 pods | 9 IPs |
+| **m5.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
+| **m5.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
+| **c6i.large** | 29 | 21 | 9 | 18 | 3 | 8 pods | 9 IPs |
+| **c6i.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
+| **c6i.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
+
+**Note**: Scheduler automatically handles pod-ENI quota limits, preventing deployment failures.
 
 ## ✨ Solution Features
 
@@ -86,37 +116,8 @@ When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployme
 │ with --max-pods │
 └─────────────────┘
 ```
-## 📊 Verified Results
 
-### Mixed Deployment Test Results (EKS 1.32, Karpenter 1.6.3)
-
-| Instance Type | Default maxPods | pod-ENI Limit | System Pods | Verification Status |
-|---------------|-----------------|---------------|-------------|-------------------|
-| **m5.large** | 29 | 9 | 2 | ✅ Verified |
-| **m5.xlarge** | 58 | 18 | 3 | ✅ Verified |
-| **m5.2xlarge** | 58 | 38 | 3 | ✅ Verified |
-| **c6i.large** | 29 | 9 | 3 | ✅ Verified |
-| **c6i.xlarge** | 58 | 18 | 3 | ✅ Verified |
-| **c6i.2xlarge** | 58 | 38 | 3 | ✅ Verified |
-
-### Production Formula (Conservative)
-- **Recommended**: `maxPods = system_pods + available_ENI_IPs`
-- **Priority**: Prevent ENI IP exhaustion in all deployment scenarios
-
-### Resource Potential Waste Analysis
-
-| Instance Type | Default maxPods | Recommended maxPods | pod-ENI Limit | Available ENI IPs | System Pods | MaxPods Potential Waste | ENI IP Potential Waste |
-|---------------|-----------------|-------------------|---------------|-----------------|-------------|------------------------|----------------------|
-| **m5.large** | 29 | 20 | 9 | 18 | 2 | 9 pods | 9 IPs |
-| **m5.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
-| **m5.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
-| **c6i.large** | 29 | 21 | 9 | 18 | 3 | 8 pods | 9 IPs |
-| **c6i.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
-| **c6i.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
-
-**Note**: Scheduler automatically handles pod-ENI quota limits, preventing deployment failures.
-
-## Derived Solutions from Experiment Results
+## Potential Solutions and Comparison
 
 Based on mixed deployment testing, two approaches emerge to address different deployment scenarios:
 
@@ -143,7 +144,7 @@ Based on mixed deployment testing, two approaches emerge to address different de
 
 **Recommendation**: Conservative approach prevents deployment failures and provides predictable behavior, making it ideal for production environments.
 
-## 🚀 Quick Star
+## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -249,7 +250,7 @@ Edit the calculation logic in `ec2nodeclass-v3.yaml`:
 ### Add New Instance Types
 Update both the AWS maxPods rules and trunk ENI compatibility check in the UserData script.
 
-## 📈 Performance Impac
+## 📈 Performance Impact
 
 - **Startup Time**: Adds ~5 seconds for detection and calculation
 - **Resource Usage**: Minimal CPU/memory overhead during bootstrap
