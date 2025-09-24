@@ -103,16 +103,16 @@ When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployme
 - **Recommended**: `maxPods = system_pods + available_ENI_IPs`
 - **Priority**: Prevent ENI IP exhaustion in all deployment scenarios
 
-### Pod Potential Waste Analysis
+### Resource Potential Waste Analysis
 
-| Instance Type | Current | Recommended | Potential Pod Waste | Waste % |
-|---------------|---------|-------------|---------------------|---------|
-| **m5.large** | 29 | 20 | 9 pods | 31% |
-| **m5.xlarge** | 58 | 45 | 13 pods | 22% |
-| **m5.2xlarge** | 58 | 45 | 13 pods | 22% |
-| **c6i.large** | 29 | 21 | 8 pods | 28% |
-| **c6i.xlarge** | 58 | 45 | 13 pods | 22% |
-| **c6i.2xlarge** | 58 | 45 | 13 pods | 22% |
+| Instance Type | Default maxPods | Recommended maxPods | pod-ENI Limit | Available ENI IPs | System Pods | MaxPods Potential Waste | ENI IP Potential Waste |
+|---------------|-----------------|-------------------|---------------|-----------------|-------------|------------------------|----------------------|
+| **m5.large** | 29 | 20 | 9 | 18 | 2 | 9 pods | 9 IPs |
+| **m5.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
+| **m5.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
+| **c6i.large** | 29 | 21 | 9 | 18 | 3 | 8 pods | 9 IPs |
+| **c6i.xlarge** | 58 | 45 | 18 | 42 | 3 | 13 pods | 24 IPs |
+| **c6i.2xlarge** | 58 | 45 | 38 | 42 | 3 | 13 pods | 38 IPs |
 
 **Note**: Scheduler automatically handles pod-ENI quota limits, preventing deployment failures.
 
@@ -213,7 +213,7 @@ Comprehensive testing covers:
 - **Resource Allocation Patterns**: ENI IP consumption vs pod-ENI quota usage
 - **System Pod Variations**: Different system pod counts across instance types
 
-See [VERIFICATION_RESULTS.md](VERIFICATION_RESULTS.md) for detailed test results.
+See [EXPERIMENT_VERIFICATION.md](EXPERIMENT_VERIFICATION.md) for detailed test results.
 
 ## 🔧 Customization
 
