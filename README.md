@@ -257,6 +257,10 @@ Edit the calculation logic in `ec2nodeclass-v3.yaml`:
 ### Add New Instance Types
 Update both the AWS maxPods rules and trunk ENI compatibility check in the UserData script.
 
+**ENI IP Calculation Formula**: `ENI_IPS = (Max_ENIs - 1) × (Secondary_IPs_per_ENI - 1)`
+
+See [INSTANCE_TYPES.md](INSTANCE_TYPES.md) for detailed instructions on adding new instance types.
+
 ## 📈 Performance Impact
 
 - **Startup Time**: Adds ~5 seconds for detection and calculation

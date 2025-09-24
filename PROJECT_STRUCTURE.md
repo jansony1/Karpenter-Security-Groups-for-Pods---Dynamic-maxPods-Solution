@@ -13,6 +13,7 @@
 
 ### Reference Documentation
 - `SUPPORTED_INSTANCES.md` - Instance type compatibility matrix (800+ instance types)
+- `INSTANCE_TYPES.md` - Currently supported instance types and how to add new ones
 - `CHANGELOG.md` - Version history and changes
 - `CONTRIBUTING.md` - Contribution guidelines
 - `LICENSE` - MIT license
