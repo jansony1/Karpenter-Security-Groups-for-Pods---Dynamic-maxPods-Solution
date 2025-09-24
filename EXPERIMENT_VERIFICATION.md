@@ -24,17 +24,37 @@ Fix the mismatch between **ENI/IP resources** and **`maxPods` setting** when dep
 | **c6i.xlarge** | 58 | 18 | 42 | 3 | ✅ Verified |
 | **c6i.2xlarge** | 58 | 38 | 42 | 3 | ✅ Verified |
 
-## Deployment Order Impac
+## Deployment Order Impact
 
-### Non-SG Pods Firs
+### Non-SG Pods First
 - **Issue**: ENI IPs exhausted before reaching maxPods
 - **Result**: IP allocation failures
 - **Example (m5.large)**: 2 system + 18 non-SG = 20 < maxPods(29) → scheduler continues → IP errors
 
-### SG Pods Firs
+### SG Pods First
 - **Issue**: maxPods reached while ENI IPs remain unused
 - **Result**: ENI IP waste
 - **Example (m5.2xlarge)**: 38 SG + 3 system = 41, remaining 17 slots vs 42 available ENI IPs
+
+## Solution Derivation from Experiment Results
+
+Based on the observed deployment order issues, two distinct problems emerge that require different approaches:
+
+### Problem 1: Non-SG Pods First → IP Allocation Failures
+**Observed**: IP exhaustion occurs before reaching `maxPods` limit
+- m5.large: Fails at 18 pods (< maxPods 29)
+- m5.xlarge: Fails at 42 pods (< maxPods 58)
+- m5.2xlarge: Fails at 42 pods (< maxPods 58)
+
+**Root Cause**: Scheduler continues placing pods because `maxPods` not reached, but ENI IPs are exhausted
+
+### Problem 2: SG Pods First → ENI IP Waste
+**Observed**: ENI IPs remain unused due to `maxPods` constraint
+- m5.large: 0 IPs wasted (optimal)
+- m5.xlarge: 5 ENI IPs wasted
+- m5.2xlarge: 25 ENI IPs wasted
+
+**Root Cause**: SG pods consume `maxPods` slots without using ENI IPs, preventing non-SG pods from utilizing available IPs
 
 ## Production Solution
 

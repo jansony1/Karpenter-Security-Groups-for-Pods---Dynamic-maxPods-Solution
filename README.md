@@ -31,6 +31,26 @@ When using AWS EKS with Karpenter and Security Groups for Pods in mixed deployme
 - **Both consume `maxPods` slots** (shared constraint)
 - **Deployment order determines success/failure**
 
+## Solution Derivation from Test Results
+
+Based on the observed issues, two distinct problems emerge that require different approaches:
+
+### Problem 1: Non-SG Pods First → IP Allocation Failures
+**Observed**: IP exhaustion occurs before reaching `maxPods` limit
+- m5.large: Fails at 18 pods (< maxPods 29)
+- m5.xlarge: Fails at 42 pods (< maxPods 58)
+- m5.2xlarge: Fails at 42 pods (< maxPods 58)
+
+**Root Cause**: Scheduler continues placing pods because `maxPods` not reached, but ENI IPs are exhausted
+
+### Problem 2: SG Pods First → ENI IP Waste
+**Observed**: ENI IPs remain unused due to `maxPods` constraint
+- m5.large: 0 IPs wasted (optimal)
+- m5.xlarge: 5 ENI IPs wasted
+- m5.2xlarge: 25 ENI IPs wasted
+
+**Root Cause**: SG pods consume `maxPods` slots without using ENI IPs, preventing non-SG pods from utilizing available IPs
+
 ## Potential Solutions and Comparison
 
 Based on mixed deployment testing, two approaches emerge to address different deployment scenarios:
